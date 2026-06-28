@@ -1,4 +1,4 @@
-# CockroachDB → PostgreSQL Migration — Proof of Concept
+# CockroachDB → PostgreSQL Migration — PoC
 
 > **Domain:** Banking &nbsp;|&nbsp; **Runtime:** Podman on WSL 2 (Ubuntu) &nbsp;|&nbsp; **Source:** CockroachDB latest &nbsp;|&nbsp; **Target:** PostgreSQL 18
 
