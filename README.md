@@ -54,36 +54,67 @@ containers inside Windows WSL 2.
 
 ## 2. Architecture
 
-```
-┌─────────────────────────────────────────────────────────────────┐
-│                    Windows WSL 2 (Ubuntu)                       │
-│                                                                 │
-│  ┌──────────────────────┐      ┌───────────────────────────┐   │
-│  │   CockroachDB         │      │      PostgreSQL 18         │   │
-│  │   crdb_poc            │      │      pg_poc                │   │
-│  │   Port 26257 / 8080   │      │      Port 5432             │   │
-│  └──────────┬────────────┘      └─────────────┬─────────────┘   │
-│             │         poc_net (bridge)         │                 │
-│             └──────────────┬───────────────────┘                 │
-│                            │                                     │
-│                  ┌─────────▼──────────┐                         │
-│                  │    poc_run.sh       │                         │
-│                  │  generate_data.py  │                         │
-│                  └────────────────────┘                         │
-│                                                                 │
-│  ~/CockroachDB2PG_POC/                                          │
-│  ├── poc_run.sh            ← orchestrator (single file)         │
-│  ├── schema/               ← DDL for both databases             │
-│  ├── scripts/              ← generate_data.py (auto-created)    │
-│  ├── data/                 ← CSV exports (temp, deleted after)  │
-│  └── logs/                 ← poc_run_YYMMDDHHMM.log per run     │
-└─────────────────────────────────────────────────────────────────┘
+### Container topology
 
-Migration Flow
-──────────────
-CockroachDB  ──SELECT --format=csv──►  sed (NULL fix)  ──►  CSV files
-CSV files    ──podman cp + COPY FROM──────────────────────►  PostgreSQL
-Validation   ──COUNT(*) + SUM(balance)────────────────────►  PASS / FAIL
+```mermaid
+graph TD
+    subgraph WSL2["Windows WSL 2 (Ubuntu)"]
+        subgraph NET["Podman network: poc_net"]
+            CRDB["🪳 CockroachDB\ncrdb_poc\nPort 26257 / 8080"]
+            PG["🐘 PostgreSQL 18\npg_poc\nPort 5432"]
+        end
+        ORC["⚙️ poc_run.sh\n(orchestrator)"]
+        GEN["🐍 generate_data.py\n(faker · psycopg2)"]
+    end
+
+    ORC -->|"start-single-node --insecure"| CRDB
+    ORC -->|"podman run postgres:18"| PG
+    GEN -->|"INSERT via psycopg2\nport 26257"| CRDB
+    ORC -->|"runs"| GEN
+    CRDB -->|"SELECT --format=csv"| ORC
+    ORC -->|"COPY FROM CSV"| PG
+```
+
+### Migration flow
+
+```mermaid
+flowchart LR
+    A([CockroachDB\ncrdb_poc]) -->|"cockroach sql\n--format=csv\nSELECT * FROM table"| B[CSV files\ndata/*.csv]
+    B -->|"sed\nNULL → empty string"| C[Normalised\nCSV files]
+    C -->|"podman cp\n+ psql COPY FROM"| D([PostgreSQL 18\npg_poc])
+
+    D --> E{Validation}
+    A -->|"COUNT(*)\nSUM(balance)"| E
+    E -->|row counts match\nchecksum match| F([✅ PASS])
+    E -->|mismatch| G([❌ FAIL])
+```
+
+### Step-by-step execution order
+
+```mermaid
+flowchart TD
+    S1["Step 1\nProject Setup\n(venv + pip)"]
+    S2["Step 2\nEnvironment\n(pull images · start containers)"]
+    S3["Step 3\nSample Data\n(generate_data.py → CockroachDB)"]
+    S4["Step 4\nSchema Migration\n(DDL adapt → PostgreSQL)"]
+    S5["Step 5\nData Migration\n(CSV export → import)"]
+    S6["Step 6\nValidation\n(row counts · checksum · JSONB)"]
+    S7["Step 7\nPerformance\n(8 queries on both DBs)"]
+    S8["Step 8\nTiming Summary"]
+    S9["Step 9\nCleanup"]
+
+    S1 --> S2 --> S3 --> S4 --> S5 --> S6 --> S7 --> S8 --> S9
+```
+
+### Directory structure
+
+```
+~/CockroachDB2PG_POC/
+├── poc_run.sh            ← orchestrator (single file)
+├── schema/               ← DDL for both databases
+├── scripts/              ← generate_data.py (auto-created)
+├── data/                 ← CSV exports (temp, deleted after import)
+└── logs/                 ← poc_run_YYMMDDHHMM.log  (one per run)
 ```
 
 ---
